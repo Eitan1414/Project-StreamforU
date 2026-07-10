@@ -18,7 +18,7 @@ Client Android natif pour le protocole **Wii U Stream v1** du plugin Aroma moder
 
 ## Utilisation
 
-1. Installer et activer `WiiUStream.wps` dans Aroma.
+1. Installer et activer `WiiUStream.wps` dans Aroma. (lien trouvable dans les realeses)
 2. Mettre la Wii U et le téléphone sur le même réseau Wi-Fi.
 3. Relever l’adresse IP locale de la Wii U.
 4. Installer puis ouvrir l’APK.
