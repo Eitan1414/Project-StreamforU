@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_zip:
-        description: "Nom du ZIP du client PC (vide = détection automatique)"
+        description: "Nom du ZIP du client PC"
         required: false
         default: "WiiUStream-PC-Client-v0.1.0.zip"
 
@@ -44,42 +44,54 @@ jobs:
             $candidates += (Resolve-Path -LiteralPath $requested).Path
           }
           else {
-            $archives = Get-ChildItem -Path . -Filter *.zip -File -Recurse |
-              Where-Object {
-                $_.FullName.Split([IO.Path]::DirectorySeparatorChar).Count -le (
-                  (Get-Location).Path.Split([IO.Path]::DirectorySeparatorChar).Count + 3
-                )
-              }
+            $archives = Get-ChildItem -Path . -Filter *.zip -File -Recurse
 
             foreach ($archive in $archives) {
               $entries = & tar -tf $archive.FullName 2>$null
 
-              $hasMain = $entries |
+              $hasMain = @(
+                $entries |
                 Where-Object { $_ -match '(^|/)main\.py$' }
+              ).Count -gt 0
 
-              $hasRequirements = $entries |
-                Where-Object { $_ -match '(^|/)requirements-build\.txt$' }
+              $hasRequirements = @(
+                $entries |
+                Where-Object {
+                  $_ -match '(^|/)requirements-build\.txt$'
+                }
+              ).Count -gt 0
 
-              $hasPackage = $entries |
-                Where-Object { $_ -match '(^|/)wiiu_stream/protocol\.py$' }
+              $hasProtocol = @(
+                $entries |
+                Where-Object {
+                  $_ -match '(^|/)wiiu_stream/protocol\.py$'
+                }
+              ).Count -gt 0
 
-              if ($hasMain -and $hasRequirements -and $hasPackage) {
+              if ($hasMain -and $hasRequirements -and $hasProtocol) {
                 $candidates += $archive.FullName
               }
             }
           }
 
           if ($candidates.Count -eq 0) {
-            Write-Error "Aucun ZIP du client PC n'a été trouvé."
+            Write-Host "ZIP présents dans le dépôt :"
+
+            Get-ChildItem -Path . -Filter *.zip -File -Recurse |
+              Select-Object -ExpandProperty FullName
+
+            throw "Aucun ZIP compatible avec le client PC n'a été trouvé."
           }
 
           if ($candidates.Count -gt 1) {
             Write-Host "Plusieurs ZIP compatibles ont été trouvés :"
 
             $candidates |
-              ForEach-Object { Write-Host " - $_" }
+              ForEach-Object {
+                Write-Host " - $_"
+              }
 
-            Write-Error "Renseigne le nom exact dans le champ source_zip."
+            throw "Indique le nom exact du ZIP dans le champ source_zip."
           }
 
           $archive = $candidates[0]
@@ -88,8 +100,11 @@ jobs:
             $env:GITHUB_WORKSPACE `
             "extracted-pc"
 
-          if (Test-Path $extractRoot) {
-            Remove-Item $extractRoot -Recurse -Force
+          if (Test-Path -LiteralPath $extractRoot) {
+            Remove-Item `
+              -LiteralPath $extractRoot `
+              -Recurse `
+              -Force
           }
 
           New-Item `
@@ -102,34 +117,43 @@ jobs:
             -DestinationPath $extractRoot `
             -Force
 
-          $projects = Get-ChildItem `
-            -Path $extractRoot `
-            -Filter main.py `
-            -File `
-            -Recurse |
+          $projects = @(
+            Get-ChildItem `
+              -Path $extractRoot `
+              -Filter main.py `
+              -File `
+              -Recurse |
             Where-Object {
-              Test-Path (
-                Join-Path `
-                  $_.Directory.FullName `
-                  "requirements-build.txt"
-              ) -and
-              Test-Path (
-                Join-Path `
-                  $_.Directory.FullName `
-                  "wiiu_stream\protocol.py"
-              )
+              $projectRoot = $_.Directory.FullName
+
+              $requirementsPath = Join-Path `
+                $projectRoot `
+                "requirements-build.txt"
+
+              $protocolPath = Join-Path `
+                $projectRoot `
+                "wiiu_stream\protocol.py"
+
+              $hasRequirements = Test-Path `
+                -LiteralPath $requirementsPath
+
+              $hasProtocol = Test-Path `
+                -LiteralPath $protocolPath
+
+              return ($hasRequirements -and $hasProtocol)
             }
+          )
 
           if ($projects.Count -ne 1) {
             Write-Host "Fichiers trouvés après extraction :"
 
             Get-ChildItem `
-              $extractRoot `
+              -Path $extractRoot `
               -File `
               -Recurse |
               Select-Object -ExpandProperty FullName
 
-            Write-Error "Impossible d'identifier un unique projet PC."
+            throw "Impossible d'identifier un unique projet PC."
           }
 
           $projectDir = $projects[0].Directory.FullName
@@ -151,12 +175,14 @@ jobs:
 
       - name: Installer les dépendances
         working-directory: ${{ steps.source.outputs.project_dir }}
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-build.txt
 
       - name: Tester le protocole
         working-directory: ${{ steps.source.outputs.project_dir }}
+        shell: pwsh
         run: |
           python -m unittest discover -s tests -v
 
@@ -178,18 +204,24 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         shell: pwsh
         run: |
+          $exe = "dist\WiiUStream-PC.exe"
+
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "Le fichier WiiUStream-PC.exe n'a pas été produit."
+          }
+
           $hash = (
             Get-FileHash `
-              dist/WiiUStream-PC.exe `
+              -LiteralPath $exe `
               -Algorithm SHA256
           ).Hash.ToLower()
 
           "$hash  WiiUStream-PC.exe" |
             Out-File `
               -Encoding ascii `
-              dist/WiiUStream-PC.exe.sha256
+              "dist\WiiUStream-PC.exe.sha256"
 
-          Get-ChildItem dist
+          Get-ChildItem -Path dist
 
       - name: Mettre le client PC en téléchargement
         uses: actions/upload-artifact@v4
