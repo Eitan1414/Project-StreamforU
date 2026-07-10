@@ -1,10 +1,10 @@
-name: Build Android 720p low-latency client from ZIP
+name: Build Android 720p client from ZIP
 
 on:
   workflow_dispatch:
     inputs:
       source_zip:
-        description: "Nom du ZIP du client Android"
+        description: "Nom du ZIP Android"
         required: false
         default: "WiiUStream-Android-Client-v0.3.0-720p-low-latency.zip"
 
@@ -35,19 +35,24 @@ jobs:
           requested="${REQUESTED_ZIP:-}"
           candidates=()
 
-          if [[ -n "$requested" ]]; then
-            [[ -f "$requested" ]] || {
-              echo "::error::ZIP introuvable : $requested"
-              exit 1
-            }
-
+          if [[ -n "$requested" && -f "$requested" ]]; then
             candidates+=("$requested")
           else
             while IFS= read -r -d '' archive; do
               listing="$(unzip -Z1 "$archive" 2>/dev/null || true)"
 
-              if grep -Eq '(^|/)settings\.gradle\.kts$' <<<"$listing" && \
-                 grep -Eq '(^|/)app/build\.gradle\.kts$' <<<"$listing"; then
+              has_settings=false
+              has_app_gradle=false
+
+              if grep -Eq '(^|/)settings\.gradle(\.kts)?$' <<<"$listing"; then
+                has_settings=true
+              fi
+
+              if grep -Eq '(^|/)app/build\.gradle(\.kts)?$' <<<"$listing"; then
+                has_app_gradle=true
+              fi
+
+              if [[ "$has_settings" == true && "$has_app_gradle" == true ]]; then
                 candidates+=("$archive")
               fi
             done < <(
@@ -62,6 +67,8 @@ jobs:
           if (( ${#candidates[@]} == 0 )); then
             echo "::error::Aucun ZIP Android compatible n'a été trouvé."
 
+            echo "ZIP présents :"
+
             find . \
               -maxdepth 3 \
               -type f \
@@ -73,6 +80,7 @@ jobs:
 
           if (( ${#candidates[@]} > 1 )); then
             echo "::error::Plusieurs ZIP Android ont été trouvés."
+            echo "::error::Indique le nom exact dans le champ source_zip."
 
             printf ' - %s\n' "${candidates[@]}"
 
@@ -81,6 +89,8 @@ jobs:
 
           archive="${candidates[0]}"
 
+          echo "ZIP sélectionné : $archive"
+
           rm -rf extracted-android
           mkdir -p extracted-android
 
@@ -88,23 +98,35 @@ jobs:
 
           roots=()
 
-          while IFS= read -r -d '' settings; do
-            root="$(dirname "$settings")"
+          while IFS= read -r -d '' settings_file; do
+            root="$(dirname "$settings_file")"
 
-            if [[ -f "$root/app/build.gradle.kts" ]]; then
+            if [[ -f "$root/app/build.gradle.kts" || \
+                  -f "$root/app/build.gradle" ]]; then
               roots+=("$root")
             fi
           done < <(
             find extracted-android \
               -type f \
-              -name settings.gradle.kts \
+              \( -name settings.gradle.kts -o -name settings.gradle \) \
               -print0
           )
 
-          if (( ${#roots[@]} != 1 )); then
-            echo "::error::Impossible d'identifier un unique projet Android."
+          if (( ${#roots[@]} == 0 )); then
+            echo "::error::Le dossier principal du projet Android n'a pas été trouvé."
 
-            printf 'Dossiers détectés : %s\n' "${roots[*]:-aucun}"
+            find extracted-android \
+              -maxdepth 5 \
+              -type f \
+              | sort
+
+            exit 1
+          fi
+
+          if (( ${#roots[@]} > 1 )); then
+            echo "::error::Plusieurs projets Android ont été détectés."
+
+            printf ' - %s\n' "${roots[@]}"
 
             exit 1
           fi
@@ -114,7 +136,7 @@ jobs:
           echo "project_dir=$project_dir" >> "$GITHUB_OUTPUT"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
 
-          echo "Projet détecté : $project_dir"
+          echo "Projet Android détecté : $project_dir"
 
       - name: Installer Java 17
         uses: actions/setup-java@v4
@@ -125,40 +147,151 @@ jobs:
       - name: Installer le SDK Android
         uses: android-actions/setup-android@v3
 
-      - name: Installer les composants Android
+      - name: Accepter les licences Android
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
 
+      - name: Installer les composants Android
+        shell: bash
+        run: |
           sdkmanager \
             "platform-tools" \
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      - name: Installer Gradle 9.4.1
+      - name: Installer Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.4.1"
 
-      - name: Compiler l’APK debug
+      - name: Afficher la structure du projet
+        shell: bash
+        run: |
+          project="${{ steps.source.outputs.project_dir }}"
+
+          echo "Projet : $project"
+
+          find "$project" \
+            -maxdepth 3 \
+            -type f \
+            | sort
+
+      - name: Compiler l’APK Android
         shell: bash
         run: |
           set -euo pipefail
 
           project="${{ steps.source.outputs.project_dir }}"
 
-          gradle \
-            --no-daemon \
-            --stacktrace \
-            --project-dir "$project" \
-            clean \
-            assembleDebug
+          if [[ -f "$project/gradlew" ]]; then
+            chmod +x "$project/gradlew"
 
-      - name: Récupérer l’APK
+            "$project/gradlew" \
+              --no-daemon \
+              --stacktrace \
+              -p "$project" \
+              clean \
+              assembleDebug
+          else
+            gradle \
+              --no-daemon \
+              --stacktrace \
+              --project-dir "$project" \
+              clean \
+              assembleDebug
+          fi
+
+      - name: Rechercher et copier l’APK
+        id: apk
         shell: bash
         run: |
           set -euo pipefail
 
           project="${{ steps.source.outputs.project_dir }}"
+
+          echo "Recherche des APK dans : $project"
+
+          mapfile -t apks < <(
+            find "$project" \
+              -type f \
+              -name '*.apk' \
+              -print
+          )
+
+          if (( ${#apks[@]} == 0 )); then
+            echo "::error::Aucun fichier APK n'a été produit."
+
+            echo "Contenu du dossier build :"
+
+            find "$project" \
+              -path '*/build/*' \
+              -type f \
+              -print \
+              2>/dev/null \
+              | sort \
+              || true
+
+            exit 1
+          fi
+
+          echo "APK trouvés :"
+
+          printf ' - %s\n' "${apks[@]}"
+
+          selected_apk=""
+
+          for apk_file in "${apks[@]}"; do
+            if [[ "$apk_file" == *"/outputs/apk/debug/"* ]]; then
+              selected_apk="$apk_file"
+              break
+            fi
+          done
+
+          if [[ -z "$selected_apk" ]]; then
+            selected_apk="${apks[0]}"
+          fi
+
+          echo "APK sélectionné : $selected_apk"
+
+          rm -rf "$GITHUB_WORKSPACE/dist"
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+
+          cp "$selected_apk" \
+            "$GITHUB_WORKSPACE/dist/WiiUStream-Android-720p-debug.apk"
+
+          sha256sum \
+            "$GITHUB_WORKSPACE/dist/WiiUStream-Android-720p-debug.apk" \
+            > "$GITHUB_WORKSPACE/dist/WiiUStream-Android-720p-debug.apk.sha256"
+
+          echo "apk_path=$GITHUB_WORKSPACE/dist/WiiUStream-Android-720p-debug.apk" \
+            >> "$GITHUB_OUTPUT"
+
+          ls -lh "$GITHUB_WORKSPACE/dist"
+
+      - name: Vérifier que l’APK existe
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f \
+            "$GITHUB_WORKSPACE/dist/WiiUStream-Android-720p-debug.apk"
+
+          file \
+            "$GITHUB_WORKSPACE/dist/WiiUStream-Android-720p-debug.apk"
+
+          ls -lh \
+            "$GITHUB_WORKSPACE/dist/WiiUStream-Android-720p-debug.apk"
+
+      - name: Mettre l’APK en téléchargement
+        uses: actions/upload-artifact@v4
+        with:
+          name: WiiUStream-Android-720p
+          path: |
+            dist/WiiUStream-Android-720p-debug.apk
+            dist/WiiUStream-Android-720p-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
 
          
