@@ -3,7 +3,7 @@ name: Build Android 720p client from ZIP
 on:
   workflow_dispatch:
     inputs:
-      source_zip:
+      source_zip: WiiUStream-Android-Client-v0.3.1-720p-crashfix.zip
         description: "Nom du ZIP Android"
         required: false
         default: "WiiUStream-Android-Client-v0.3.0-720p-low-latency.zip"
