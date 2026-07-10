@@ -1,4 +1,4 @@
-name: Build PC client from ZIP
+name: Build PC 720p low-latency client from ZIP
 
 on:
   workflow_dispatch:
@@ -6,12 +6,12 @@ on:
       source_zip:
         description: "Nom du ZIP du client PC"
         required: false
-        default: "WiiUStream-PC-Client-v0.1.0.zip"
+        default: "WiiUStream-PC-Client-v0.3.0-720p-low-latency.zip"
 
   push:
     paths:
       - "*.zip"
-      - ".github/workflows/build-pc-from-zip.yml"
+      - ".github/workflows/build-pc-720p-from-zip.yml"
 
 permissions:
   contents: read
@@ -41,17 +41,25 @@ jobs:
           $candidates = @()
 
           if ($requested -and (Test-Path -LiteralPath $requested)) {
-            $candidates += (Resolve-Path -LiteralPath $requested).Path
+            $candidates += (
+              Resolve-Path -LiteralPath $requested
+            ).Path
           }
           else {
-            $archives = Get-ChildItem -Path . -Filter *.zip -File -Recurse
+            $archives = Get-ChildItem `
+              -Path . `
+              -Filter *.zip `
+              -File `
+              -Recurse
 
             foreach ($archive in $archives) {
               $entries = & tar -tf $archive.FullName 2>$null
 
               $hasMain = @(
                 $entries |
-                Where-Object { $_ -match '(^|/)main\.py$' }
+                Where-Object {
+                  $_ -match '(^|/)main\.py$'
+                }
               ).Count -gt 0
 
               $hasRequirements = @(
@@ -77,7 +85,11 @@ jobs:
           if ($candidates.Count -eq 0) {
             Write-Host "ZIP présents dans le dépôt :"
 
-            Get-ChildItem -Path . -Filter *.zip -File -Recurse |
+            Get-ChildItem `
+              -Path . `
+              -Filter *.zip `
+              -File `
+              -Recurse |
               Select-Object -ExpandProperty FullName
 
             throw "Aucun ZIP compatible avec le client PC n'a été trouvé."
@@ -180,13 +192,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-build.txt
 
-      - name: Tester le protocole
+      - name: Tester le protocole réseau
         working-directory: ${{ steps.source.outputs.project_dir }}
         shell: pwsh
         run: |
           python -m unittest discover -s tests -v
 
-      - name: Compiler l'exécutable Windows
+      - name: Compiler l’exécutable Windows
         working-directory: ${{ steps.source.outputs.project_dir }}
         shell: pwsh
         run: |
@@ -200,7 +212,7 @@ jobs:
             --hidden-import PIL._tkinter_finder `
             main.py
 
-      - name: Créer la somme SHA-256
+      - name: Vérifier l’exécutable et créer le SHA-256
         working-directory: ${{ steps.source.outputs.project_dir }}
         shell: pwsh
         run: |
@@ -226,7 +238,7 @@ jobs:
       - name: Mettre le client PC en téléchargement
         uses: actions/upload-artifact@v4
         with:
-          name: WiiUStream-PC-Windows
+          name: WiiUStream-PC-Windows-720p
           path: |
             ${{ steps.source.outputs.project_dir }}/dist/WiiUStream-PC.exe
             ${{ steps.source.outputs.project_dir }}/dist/WiiUStream-PC.exe.sha256
