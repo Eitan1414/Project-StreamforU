@@ -1,0 +1,164 @@
+name: Build Android 720p low-latency client from ZIP
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_zip:
+        description: "Nom du ZIP du client Android"
+        required: false
+        default: "WiiUStream-Android-Client-v0.3.0-720p-low-latency.zip"
+
+  push:
+    paths:
+      - "*.zip"
+      - ".github/workflows/build-android-720p-from-zip.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Télécharger le dépôt
+        uses: actions/checkout@v4
+
+      - name: Trouver et décompresser le ZIP Android
+        id: source
+        shell: bash
+        env:
+          REQUESTED_ZIP: ${{ inputs.source_zip }}
+        run: |
+          set -euo pipefail
+
+          requested="${REQUESTED_ZIP:-}"
+          candidates=()
+
+          if [[ -n "$requested" ]]; then
+            [[ -f "$requested" ]] || {
+              echo "::error::ZIP introuvable : $requested"
+              exit 1
+            }
+
+            candidates+=("$requested")
+          else
+            while IFS= read -r -d '' archive; do
+              listing="$(unzip -Z1 "$archive" 2>/dev/null || true)"
+
+              if grep -Eq '(^|/)settings\.gradle\.kts$' <<<"$listing" && \
+                 grep -Eq '(^|/)app/build\.gradle\.kts$' <<<"$listing"; then
+                candidates+=("$archive")
+              fi
+            done < <(
+              find . \
+                -maxdepth 3 \
+                -type f \
+                -iname '*.zip' \
+                -print0
+            )
+          fi
+
+          if (( ${#candidates[@]} == 0 )); then
+            echo "::error::Aucun ZIP Android compatible n'a été trouvé."
+
+            find . \
+              -maxdepth 3 \
+              -type f \
+              -iname '*.zip' \
+              -print
+
+            exit 1
+          fi
+
+          if (( ${#candidates[@]} > 1 )); then
+            echo "::error::Plusieurs ZIP Android ont été trouvés."
+
+            printf ' - %s\n' "${candidates[@]}"
+
+            exit 1
+          fi
+
+          archive="${candidates[0]}"
+
+          rm -rf extracted-android
+          mkdir -p extracted-android
+
+          unzip -q "$archive" -d extracted-android
+
+          roots=()
+
+          while IFS= read -r -d '' settings; do
+            root="$(dirname "$settings")"
+
+            if [[ -f "$root/app/build.gradle.kts" ]]; then
+              roots+=("$root")
+            fi
+          done < <(
+            find extracted-android \
+              -type f \
+              -name settings.gradle.kts \
+              -print0
+          )
+
+          if (( ${#roots[@]} != 1 )); then
+            echo "::error::Impossible d'identifier un unique projet Android."
+
+            printf 'Dossiers détectés : %s\n' "${roots[*]:-aucun}"
+
+            exit 1
+          fi
+
+          project_dir="$(realpath "${roots[0]}")"
+
+          echo "project_dir=$project_dir" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+          echo "Projet détecté : $project_dir"
+
+      - name: Installer Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Installer le SDK Android
+        uses: android-actions/setup-android@v3
+
+      - name: Installer les composants Android
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Installer Gradle 9.4.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.4.1"
+
+      - name: Compiler l’APK debug
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          project="${{ steps.source.outputs.project_dir }}"
+
+          gradle \
+            --no-daemon \
+            --stacktrace \
+            --project-dir "$project" \
+            clean \
+            assembleDebug
+
+      - name: Récupérer l’APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          project="${{ steps.source.outputs.project_dir }}"
+
+         
