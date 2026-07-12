@@ -1,0 +1,190 @@
+name: Build PC 480p Turbo client
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_zip:
+        description: "Nom exact du ZIP du client PC"
+        required: true
+        default: "WiiUStream-PC-Client-v0.5.0-480p-turbo.zip"
+
+  push:
+    paths:
+      - "WiiUStream-PC-Client-v0.5.0-480p-turbo.zip"
+      - ".github/workflows/build-pc-480p-turbo-from-zip.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Télécharger le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Vérifier et décompresser le ZIP
+        id: source
+        shell: pwsh
+        env:
+          SOURCE_ZIP: ${{ inputs.source_zip }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $zipFile = if ($env:SOURCE_ZIP) {
+            $env:SOURCE_ZIP
+          }
+          else {
+            "WiiUStream-PC-Client-v0.5.0-480p-turbo.zip"
+          }
+
+          if (-not (Test-Path -LiteralPath $zipFile)) {
+            Write-Host "ZIP disponibles :"
+
+            Get-ChildItem `
+              -Path . `
+              -Filter *.zip `
+              -File `
+              -Recurse |
+              Select-Object -ExpandProperty FullName
+
+            throw "ZIP introuvable : $zipFile"
+          }
+
+          $extractDir = Join-Path `
+            $env:RUNNER_TEMP `
+            "wiiustream-pc"
+
+          if (Test-Path -LiteralPath $extractDir) {
+            Remove-Item `
+              -LiteralPath $extractDir `
+              -Recurse `
+              -Force
+          }
+
+          New-Item `
+            -ItemType Directory `
+            -Path $extractDir |
+            Out-Null
+
+          Expand-Archive `
+            -LiteralPath $zipFile `
+            -DestinationPath $extractDir `
+            -Force
+
+          $projects = @(
+            Get-ChildItem `
+              -Path $extractDir `
+              -Filter main.py `
+              -File `
+              -Recurse |
+            Where-Object {
+              $root = $_.Directory.FullName
+
+              $hasRequirements = Test-Path `
+                -LiteralPath (
+                  Join-Path `
+                    $root `
+                    "requirements-build.txt"
+                )
+
+              $hasProtocol = Test-Path `
+                -LiteralPath (
+                  Join-Path `
+                    $root `
+                    "wiiu_stream\protocol.py"
+                )
+
+              return ($hasRequirements -and $hasProtocol)
+            }
+          )
+
+          if ($projects.Count -ne 1) {
+            Write-Host "Fichiers trouvés après extraction :"
+
+            Get-ChildItem `
+              -Path $extractDir `
+              -File `
+              -Recurse |
+              Select-Object -ExpandProperty FullName
+
+            throw "Impossible d’identifier un unique projet PC."
+          }
+
+          $projectDir = $projects[0].Directory.FullName
+
+          "project_dir=$projectDir" |
+            Out-File `
+              -FilePath $env:GITHUB_OUTPUT `
+              -Encoding utf8 `
+              -Append
+
+          Write-Host "Projet détecté : $projectDir"
+
+      - name: Installer les dépendances
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Tester le protocole v2
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -v
+
+      - name: Compiler l’exécutable Windows
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --onefile `
+            --windowed `
+            --name WiiUStream-PC-480p-Turbo `
+            --icon assets/wiiustream.ico `
+            --hidden-import PIL._tkinter_finder `
+            main.py
+
+      - name: Préparer l’artifact
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        shell: pwsh
+        run: |
+          $exe = "dist\WiiUStream-PC-480p-Turbo.exe"
+
+          if (-not (Test-Path -LiteralPath $exe)) {
+            throw "L’exécutable n’a pas été produit."
+          }
+
+          $hash = (
+            Get-FileHash `
+              -LiteralPath $exe `
+              -Algorithm SHA256
+          ).Hash.ToLower()
+
+          "$hash  WiiUStream-PC-480p-Turbo.exe" |
+            Out-File `
+              -Encoding ascii `
+              "dist\WiiUStream-PC-480p-Turbo.exe.sha256"
+
+          Get-ChildItem dist
+
+      - name: Mettre le client PC en téléchargement
+        uses: actions/upload-artifact@v4
+        with:
+          name: WiiUStream-PC-480p-Turbo
+          path: |
+            ${{ steps.source.outputs.project_dir }}/dist/WiiUStream-PC-480p-Turbo.exe
+            ${{ steps.source.outputs.project_dir }}/dist/WiiUStream-PC-480p-Turbo.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
