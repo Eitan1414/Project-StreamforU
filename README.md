@@ -1,6 +1,6 @@
 # WiiUStream PC Client v0.5.0 — 480p Turbo
 
-Client Windows pour le plugin Aroma `StreamingPluginWiiU-Aroma-v0.5.0-480p-turbo`.
+Client pour le plugin Aroma (aussi inclus) 'StreamingPluginWiiU-Aroma-v0.5.0-480p-turbo`.
 
 ## Fonctions
 
