@@ -1,4 +1,4 @@
-name: Build Android 480p Stable client
+name: Build Android 480p Turbo client
 
 on:
   workflow_dispatch:
@@ -6,12 +6,12 @@ on:
       source_zip:
         description: "Nom exact du ZIP Android"
         required: true
-        default: "WiiUStream-Android-Client-v0.4.0-480p-stable.zip"
+        default: "WiiUStream-Android-Client-v0.5.0-480p-turbo.zip"
 
   push:
     paths:
-      - "WiiUStream-Android-Client-v0.4.0-480p-stable.zip"
-      - ".github/workflows/build-android-480p-from-zip.yml"
+      - "WiiUStream-Android-Client-v0.5.0-480p-turbo.zip"
+      - ".github/workflows/build-android-480p-turbo-from-zip.yml"
 
 permissions:
   contents: read
@@ -33,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          zip_file="${SOURCE_ZIP:-WiiUStream-Android-Client-v0.4.0-480p-stable.zip}"
+          zip_file="${SOURCE_ZIP:-WiiUStream-Android-Client-v0.5.0-480p-turbo.zip}"
 
           if [[ ! -f "$zip_file" ]]; then
             echo "::error::ZIP introuvable : $zip_file"
@@ -153,17 +153,17 @@ jobs:
           rm -rf dist
           mkdir -p dist
 
-          cp "$apk" dist/WiiUStream-Android-480p-Stable.apk
+          cp "$apk" dist/WiiUStream-Android-480p-Turbo.apk
 
-          sha256sum dist/WiiUStream-Android-480p-Stable.apk \
-            > dist/WiiUStream-Android-480p-Stable.apk.sha256
+          sha256sum dist/WiiUStream-Android-480p-Turbo.apk \
+            > dist/WiiUStream-Android-480p-Turbo.apk.sha256
 
           ls -lh dist
 
       - name: Mettre l’APK en téléchargement
         uses: actions/upload-artifact@v4
         with:
-          name: WiiUStream-Android-480p-Stable
+          name: WiiUStream-Android-480p-Turbo
           path: dist/
           if-no-files-found: error
           retention-days: 30
