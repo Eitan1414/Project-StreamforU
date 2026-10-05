@@ -30,4 +30,4 @@ Le programme écoute la vidéo sur UDP `9445` et envoie le signal de présence �
 - double-clic sur l’image : plein écran.
 
 
-Ce projet etant fini et fonctionnel ne recevra plus d'update meric de votre soutient durant son devloppement
+Ce projet etant fini et fonctionnel ne recevra plus d'update merci de votre soutient durant son devloppement
