@@ -1,4 +1,4 @@
-# WiiUStream PC Client v0.5.0 — 480p Turbo
+# WiiUStream v0.5.0
 
 Client pour le plugin Aroma (aussi inclus) 'StreamingPluginWiiU-Aroma-v0.5.0-480p-turbo`.
 
@@ -29,10 +29,4 @@ Le programme écoute la vidéo sur UDP `9445` et envoie le signal de présence �
 - `Échap` : quitter le plein écran ;
 - double-clic sur l’image : plein écran.
 
-## Compilation locale
 
-Lancer `build_windows.bat`. L’exécutable sera créé dans :
-
-```text
-dist/WiiUStream-PC-480p-Turbo.exe
-```
